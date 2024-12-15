@@ -1,0 +1,6 @@
+{
+  "imports": {
+    "@std/assert": "jsr:@std/assert@^1.0.9",
+    "@std/async": "jsr:@std/async@^1.0.9"
+  }
+}
