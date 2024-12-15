@@ -1,6 +1,6 @@
 import { assertEquals, assertFalse } from "jsr:@std/assert";
 import { delay } from "jsr:@std/async";
-import { TTLCache, TTLCacheBackedWithFetch, TTLCacheWithBatchFetch, TTLCacheWithSingleFetch } from "./ttl-cache.ts";
+import { TTLCache, LazyLoadingCache, AutoRefreshBatchItemCache, AutoRefreshSingleItemCache } from "./ttl-cache.ts";
 
 // TTLCache 的测试用例
 Deno.test("TTLCache - 基本的设置和获取操作", () => {
@@ -48,13 +48,13 @@ Deno.test("TTLCache - maxSize限制测试", () => {
   assertEquals(cache.get("key3").found, true);
 });
 
-// TTLCacheBackedWithFetch 的测试用例
-Deno.test("TTLCacheBackedWithFetch - 基本的获取操作", async () => {
+// LazyLoadingCache 的测试用例
+Deno.test("LazyLoadingCache - 基本的获取操作", async () => {
   const fetchData = async (key: string) => {
     return { got: true, data: 100 };
   };
   
-  const cache = new TTLCacheBackedWithFetch(fetchData, {});
+  const cache = new LazyLoadingCache(fetchData, {});
   const result = await cache.get("key1");
   
   assertEquals(result.found, true);
@@ -63,18 +63,18 @@ Deno.test("TTLCacheBackedWithFetch - 基本的获取操作", async () => {
   }
 });
 
-Deno.test("TTLCacheBackedWithFetch - 处理fetch失败的情况", async () => {
+Deno.test("LazyLoadingCache - 处理fetch失败的情况", async () => {
   const fetchData = async (key: string) => {
     return { got: false } as const;
   };
   
-  const cache = new TTLCacheBackedWithFetch(fetchData, {});
+  const cache = new LazyLoadingCache(fetchData, {});
   const result = await cache.get("key1");
   
   assertFalse(result.found);
 });
 
-Deno.test("TTLCacheBackedWithFetch - 并发请求测试", async () => {
+Deno.test("LazyLoadingCache - 并发请求测试", async () => {
   let fetchCount = 0;
   const fetchData = async (key: string) => {
     fetchCount++;
@@ -82,7 +82,7 @@ Deno.test("TTLCacheBackedWithFetch - 并发请求测试", async () => {
     return { got: true, data: 100 };
   };
   
-  const cache = new TTLCacheBackedWithFetch(fetchData, {});
+  const cache = new LazyLoadingCache(fetchData, {});
   
   // 同时发起多个请求
   const promises = [
@@ -105,14 +105,14 @@ Deno.test("TTLCacheBackedWithFetch - 并发请求测试", async () => {
   assertEquals(fetchCount, 1);
 });
 
-Deno.test("TTLCacheBackedWithFetch - TTL过期后重新获取", async () => {
+Deno.test("LazyLoadingCache - TTL过期后重新获取", async () => {
   let fetchCount = 0;
   const fetchData = async (key: string) => {
     fetchCount++;
     return { got: true, data: fetchCount };
   };
   
-  const cache = new TTLCacheBackedWithFetch(fetchData, { defaultTTL: 100 });
+  const cache = new LazyLoadingCache(fetchData, { defaultTTL: 100 });
   
   // 第一次获取
   let result = await cache.get("key1");
@@ -134,25 +134,25 @@ Deno.test("TTLCacheBackedWithFetch - TTL过期后重新获取", async () => {
   assertEquals(fetchCount, 2);
 });
 
-Deno.test("TTLCacheBackedWithFetch - 处理fetch抛出异常的情��", async () => {
+Deno.test("LazyLoadingCache - 处理fetch抛出异常的情况", async () => {
   const fetchData = async (key: string) => {
     throw new Error("网络错误");
   };
   
-  const cache = new TTLCacheBackedWithFetch(fetchData, {});
+  const cache = new LazyLoadingCache(fetchData, {});
   const result = await cache.get("key1");
   
   assertFalse(result.found);
 });
 
-Deno.test("TTLCacheBackedWithFetch - 并发请求时处理异常", async () => {
+Deno.test("LazyLoadingCache - 并发请求时处理异常", async () => {
   let fetchCount = 0;
   const fetchData = async (key: string) => {
     fetchCount++;
     throw new Error("网络错误");
   };
   
-  const cache = new TTLCacheBackedWithFetch(fetchData, {});
+  const cache = new LazyLoadingCache(fetchData, {});
   
   // 同时发起多个请求
   const promises = [
@@ -172,12 +172,12 @@ Deno.test("TTLCacheBackedWithFetch - 并发请求时处理异常", async () => {
   assertEquals(fetchCount, 1);
 });
 
-Deno.test("TTLCacheBackedWithFetch - 手动设置缓存项", async () => {
+Deno.test("LazyLoadingCache - 手动设置缓存项", async () => {
   const fetchData = async (key: string) => {
     return { got: true, data: 999 };
   };
   
-  const cache = new TTLCacheBackedWithFetch(fetchData, { defaultTTL: 100 });
+  const cache = new LazyLoadingCache(fetchData, { defaultTTL: 100 });
   
   // 手动设置缓存项
   cache.set("key1", 100);
@@ -200,8 +200,63 @@ Deno.test("TTLCacheBackedWithFetch - 手动设置缓存项", async () => {
   }
 });
 
-// TTLCacheWithBatchFetch 的测试用例
-Deno.test("TTLCacheWithBatchFetch - 基本的批量获取操作", async () => {
+Deno.test("LazyLoadingCache - onFetchError 回调测试", async () => {
+  let errorMessage = "";
+  const expectedError = new Error("自定义错误");
+  
+  const fetchData = async (key: string) => {
+    throw expectedError;
+  };
+  
+  const cache = new LazyLoadingCache(fetchData, {
+    onFetchError: (error: Error) => {
+      errorMessage = error.message;
+    }
+  });
+  
+  // 触发错误
+  const result = await cache.get("key1");
+  
+  // 验证错误回调被调用
+  assertEquals(errorMessage, "自定义错误");
+  
+  // 验证返回未找到
+  assertFalse(result.found);
+});
+
+Deno.test("LazyLoadingCache - 默认错误处理测试", async () => {
+  // 保存原始的 console.error
+  const originalConsoleError = console.error;
+  let errorLogged = false;
+  
+  // 替换 console.error
+  console.error = (...args: any[]) => {
+    errorLogged = true;
+  };
+  
+  try {
+    const fetchData = async (key: string) => {
+      throw new Error("测试错误");
+    };
+    
+    const cache = new LazyLoadingCache(fetchData, {});
+    
+    // 触发错误
+    const result = await cache.get("key1");
+    
+    // 验证错误被记录
+    assertEquals(errorLogged, true);
+    
+    // 验证返回未找到
+    assertFalse(result.found);
+  } finally {
+    // 恢复原始的 console.error
+    console.error = originalConsoleError;
+  }
+});
+
+// AutoRefreshBatchItemCache 的测试用例
+Deno.test("AutoRefreshBatchItemCache - 基本的批量获取操作", async () => {
   const fetchAllData = async () => {
     return {
       entries: [
@@ -211,7 +266,7 @@ Deno.test("TTLCacheWithBatchFetch - 基本的批量获取操作", async () => {
     };
   };
 
-  const cache = new TTLCacheWithBatchFetch<string, number>(fetchAllData, {});
+  const cache = new AutoRefreshBatchItemCache<string, number>(fetchAllData, {});
   await cache.fetchAll();
 
   const result1 = await cache.get("key1");
@@ -225,31 +280,31 @@ Deno.test("TTLCacheWithBatchFetch - 基本的批量获取操作", async () => {
   cache.shutdown();
 });
 
-Deno.test("TTLCacheWithBatchFetch - 处理fetch失败的情况", async () => {
+Deno.test("AutoRefreshBatchItemCache - 处理fetch失败的情况", async () => {
   const fetchAllData = async () => {
     throw new Error("网络错误");
   };
 
-  const cache = new TTLCacheWithBatchFetch(fetchAllData, {});
+  const cache = new AutoRefreshBatchItemCache(fetchAllData, {});
   
   // 验证 fetchAll 不会抛出异常
   await cache.fetchAll();
   
-  // 验证获取数据返回���找到
+  // 验证不会写入缓存
   const result = await cache.get("key1");
   assertFalse(result.found);
 
   cache.shutdown();
 });
 
-Deno.test("TTLCacheWithBatchFetch - onFetchError 回调测试", async () => {
+Deno.test("AutoRefreshBatchItemCache - onFetchError 回调测试", async () => {
   let errorMessage = "";
   
   const fetchAllData = async () => {
     throw new Error("自定义错误");
   };
 
-  const cache = new TTLCacheWithBatchFetch(fetchAllData, {
+  const cache = new AutoRefreshBatchItemCache(fetchAllData, {
     onFetchError: (error: Error) => {
       errorMessage = error.message;
     }
@@ -268,14 +323,14 @@ Deno.test("TTLCacheWithBatchFetch - onFetchError 回调测试", async () => {
   cache.shutdown();
 });
 
-Deno.test("TTLCacheWithBatchFetch - TTL过期测试", async () => {
+Deno.test("AutoRefreshBatchItemCache - TTL过期测试", async () => {
   const fetchAllData = async () => {
     return {
       entries: [["key1", 100] as [string, number]] ,
     };
   };
 
-  const cache = new TTLCacheWithBatchFetch(fetchAllData, { defaultTTL: 100 });
+  const cache = new AutoRefreshBatchItemCache(fetchAllData, { defaultTTL: 100 });
   await cache.fetchAll();
 
   // 验证刚设置的值可以被获取
@@ -292,7 +347,7 @@ Deno.test("TTLCacheWithBatchFetch - TTL过期测试", async () => {
   cache.shutdown();
 });
 
-Deno.test("TTLCacheWithBatchFetch - 并发请求测试", async () => {
+Deno.test("AutoRefreshBatchItemCache - 并发请求测试", async () => {
   let fetchCount = 0;
   const fetchAllData = async () => {
     fetchCount++;
@@ -302,7 +357,7 @@ Deno.test("TTLCacheWithBatchFetch - 并发请求测试", async () => {
     };
   };
 
-  const cache = new TTLCacheWithBatchFetch(fetchAllData, {});
+  const cache = new AutoRefreshBatchItemCache(fetchAllData, {});
 
   // 同时发起多个fetchAll请求
   const promises = [
@@ -326,7 +381,7 @@ Deno.test("TTLCacheWithBatchFetch - 并发请求测试", async () => {
   cache.shutdown();
 });
 
-Deno.test("TTLCacheWithBatchFetch - 自动刷新测试", async () => {
+Deno.test("AutoRefreshBatchItemCache - 自动刷新测试", async () => {
   let fetchCount = 0;
   const fetchAllData = async () => {
     fetchCount++;
@@ -335,7 +390,7 @@ Deno.test("TTLCacheWithBatchFetch - 自动刷新测试", async () => {
     };
   };
 
-  const cache = new TTLCacheWithBatchFetch(fetchAllData, {
+  const cache = new AutoRefreshBatchItemCache(fetchAllData, {
     refreshInterval: 100,
   });
 
@@ -360,14 +415,14 @@ Deno.test("TTLCacheWithBatchFetch - 自动刷新测试", async () => {
   cache.shutdown();
 });
 
-Deno.test("TTLCacheWithBatchFetch - 手动设置和清理操作", async () => {
+Deno.test("AutoRefreshBatchItemCache - 手动设置和清理操作", async () => {
   const fetchAllData = async () => {
     return {
       entries: [["key1", 100] as [string, number]],
     };
   };
 
-  const cache = new TTLCacheWithBatchFetch(fetchAllData, {});
+  const cache = new AutoRefreshBatchItemCache(fetchAllData, {});
   await cache.fetchAll();
 
   // 手动设置新值
@@ -391,7 +446,7 @@ Deno.test("TTLCacheWithBatchFetch - 手动设置和清理操作", async () => {
   cache.shutdown();
 });
 
-Deno.test("TTLCacheWithBatchFetch - shutdown 方法测试", async () => {
+Deno.test("AutoRefreshBatchItemCache - shutdown 方法测试", async () => {
   let fetchCount = 0;
   const fetchAllData = async () => {
     fetchCount++;
@@ -400,7 +455,7 @@ Deno.test("TTLCacheWithBatchFetch - shutdown 方法测试", async () => {
     };
   };
 
-  const cache = new TTLCacheWithBatchFetch(fetchAllData, {
+  const cache = new AutoRefreshBatchItemCache(fetchAllData, {
     refreshInterval: 100,
   });
 
@@ -420,7 +475,7 @@ Deno.test("TTLCacheWithBatchFetch - shutdown 方法测试", async () => {
   assertFalse(result.found);
 });
 
-Deno.test("TTLCacheWithBatchFetch - fetchOnStart 选项测试", async () => {
+Deno.test("AutoRefreshBatchItemCache - fetchOnStart 选项测试", async () => {
   let fetchCount = 0;
   const fetchAllData = async () => {
     fetchCount++;
@@ -430,7 +485,7 @@ Deno.test("TTLCacheWithBatchFetch - fetchOnStart 选项测试", async () => {
   };
 
   // 测试默认行为（fetchOnStart = true）
-  const defaultCache = new TTLCacheWithBatchFetch(fetchAllData, {});
+  const defaultCache = new AutoRefreshBatchItemCache(fetchAllData, {});
   assertEquals(fetchCount, 1); // 应该立即调用 fetchAllData
   defaultCache.shutdown();
 
@@ -438,7 +493,7 @@ Deno.test("TTLCacheWithBatchFetch - fetchOnStart 选项测试", async () => {
   fetchCount = 0;
 
   // 测试 fetchOnStart = false
-  const cache = new TTLCacheWithBatchFetch(fetchAllData, {
+  const cache = new AutoRefreshBatchItemCache(fetchAllData, {
     fetchOnStart: false
   });
   assertEquals(fetchCount, 0); // 不应该调用 fetchAllData
@@ -460,71 +515,15 @@ Deno.test("TTLCacheWithBatchFetch - fetchOnStart 选项测试", async () => {
 
   cache.shutdown();
 });
-
-Deno.test("TTLCacheBackedWithFetch - onFetchError 回调测试", async () => {
-    let errorMessage = "";
-    const expectedError = new Error("自定义错误");
-    
-    const fetchData = async (key: string) => {
-      throw expectedError;
-    };
-    
-    const cache = new TTLCacheBackedWithFetch(fetchData, {
-      onFetchError: (error: Error) => {
-        errorMessage = error.message;
-      }
-    });
-    
-    // 触发错误
-    const result = await cache.get("key1");
-    
-    // 验证错误回调被调用
-    assertEquals(errorMessage, "自定义错误");
-    
-    // 验证返回未找到
-    assertFalse(result.found);
-  });
-  
-  Deno.test("TTLCacheBackedWithFetch - 默认错误处理测试", async () => {
-    // 保存原始的 console.error
-    const originalConsoleError = console.error;
-    let errorLogged = false;
-    
-    // 替换 console.error
-    console.error = (...args: any[]) => {
-      errorLogged = true;
-    };
-    
-    try {
-      const fetchData = async (key: string) => {
-        throw new Error("测试错误");
-      };
-      
-      const cache = new TTLCacheBackedWithFetch(fetchData, {});
-      
-      // 触发错误
-      const result = await cache.get("key1");
-      
-      // 验证错误被记录
-      assertEquals(errorLogged, true);
-      
-      // 验证返回未找到
-      assertFalse(result.found);
-    } finally {
-      // 恢复原始的 console.error
-      console.error = originalConsoleError;
-    }
-  });
-  
   
 
-// TTLCacheWithSingleFetch 的测试用例
-Deno.test("TTLCacheWithSingleFetch - 基本的获取操作", async () => {
+// AutoRefreshSingleItemCache 的测试用例
+Deno.test("AutoRefreshSingleItemCache - 基本的获取操作", async () => {
   const fetchData = async () => {
     return 100;
   };
 
-  const cache = new TTLCacheWithSingleFetch<number>(fetchData, {});
+  const cache = new AutoRefreshSingleItemCache<number>(fetchData, {});
   const result = await cache.get();
   
   assertEquals(result.found, true);
@@ -535,13 +534,13 @@ Deno.test("TTLCacheWithSingleFetch - 基本的获取操作", async () => {
   cache.shutdown();
 });
 
-Deno.test("TTLCacheWithSingleFetch - 处理fetch失败的情况", async () => {
+Deno.test("AutoRefreshSingleItemCache - 处理fetch失败的情况", async () => {
   let errorCaught = false;
   const fetchData = async () => {
     throw new Error("网络错误");
   };
 
-  const cache = new TTLCacheWithSingleFetch(fetchData, {
+  const cache = new AutoRefreshSingleItemCache(fetchData, {
     onFetchError: (error: Error) => {
       errorCaught = true;
     }
@@ -554,12 +553,12 @@ Deno.test("TTLCacheWithSingleFetch - 处理fetch失败的情况", async () => {
   cache.shutdown();
 });
 
-Deno.test("TTLCacheWithSingleFetch - TTL过期测试", async () => {
+Deno.test("AutoRefreshSingleItemCache - TTL过期测试", async () => {
   const fetchData = async () => {
     return 100;
   };
 
-  const cache = new TTLCacheWithSingleFetch(fetchData, { defaultTTL: 100 });
+  const cache = new AutoRefreshSingleItemCache(fetchData, { defaultTTL: 100 });
   
   // 验证刚设置的值可以被获取
   let result = await cache.get();
@@ -575,14 +574,14 @@ Deno.test("TTLCacheWithSingleFetch - TTL过期测试", async () => {
   cache.shutdown();
 });
 
-Deno.test("TTLCacheWithSingleFetch - 自动刷新测试", async () => {
+Deno.test("AutoRefreshSingleItemCache - 自动刷新测试", async () => {
   let fetchCount = 0;
   const fetchData = async () => {
     fetchCount++;
     return fetchCount;
   };
 
-  const cache = new TTLCacheWithSingleFetch(fetchData, {
+  const cache = new AutoRefreshSingleItemCache(fetchData, {
     refreshInterval: 100,
   });
 
@@ -602,12 +601,12 @@ Deno.test("TTLCacheWithSingleFetch - 自动刷新测试", async () => {
   cache.shutdown();
 });
 
-Deno.test("TTLCacheWithSingleFetch - 手动设置和清理操作", async () => {
+Deno.test("AutoRefreshSingleItemCache - 手动设置和清理操作", async () => {
   const fetchData = async () => {
     return 100;
   };
 
-  const cache = new TTLCacheWithSingleFetch(fetchData, { refreshInterval: 100 });
+  const cache = new AutoRefreshSingleItemCache(fetchData, { refreshInterval: 100 });
 
   // 验证自动获取的值
   let result = await cache.get();
@@ -633,7 +632,7 @@ Deno.test("TTLCacheWithSingleFetch - 手动设置和清理操作", async () => {
   cache.shutdown();
 });
 
-Deno.test("TTLCacheWithSingleFetch - fetchOnStart 选项测试", async () => {
+Deno.test("AutoRefreshSingleItemCache - fetchOnStart 选项测试", async () => {
   let fetchCount = 0;
   const fetchData = async () => {
     fetchCount++;
@@ -641,7 +640,7 @@ Deno.test("TTLCacheWithSingleFetch - fetchOnStart 选项测试", async () => {
   };
 
   // 测试默认行为（fetchOnStart = true）
-  const defaultCache = new TTLCacheWithSingleFetch(fetchData, {});
+  const defaultCache = new AutoRefreshSingleItemCache(fetchData, {});
   assertEquals(fetchCount, 1); // 应该立即调用 fetchData
   defaultCache.shutdown();
 
@@ -649,7 +648,7 @@ Deno.test("TTLCacheWithSingleFetch - fetchOnStart 选项测试", async () => {
   fetchCount = 0;
 
   // 测试 fetchOnStart = false
-  const cache = new TTLCacheWithSingleFetch(fetchData, {
+  const cache = new AutoRefreshSingleItemCache(fetchData, {
     fetchOnStart: false
   });
   assertEquals(fetchCount, 0); // 不应该调用 fetchData

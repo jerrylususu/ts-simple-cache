@@ -129,17 +129,17 @@ interface FetchNotFound {
 
 type FetchResult<V> = FetchSuccess<V> | FetchNotFound;
 
-interface TTLCacheBackedWithFetchOptions extends TTLCacheOptions {
+interface LazyLoadingCacheOptions extends TTLCacheOptions {
   onFetchError?: (error: Error) => void;
 }
 
-export class TTLCacheBackedWithFetch<K, V> {
+export class LazyLoadingCache<K, V> {
   private cache: TTLCache<K, V>;
   private pendingFetches: Map<K, PendingFetch<V>>;
   private fetchData: (key: K) => Promise<FetchResult<V>>;
   private readonly onFetchError: (error: Error) => void;
 
-  constructor(fetchData: (key: K) => Promise<FetchResult<V>>, options: TTLCacheBackedWithFetchOptions) {
+  constructor(fetchData: (key: K) => Promise<FetchResult<V>>, options: LazyLoadingCacheOptions) {
     this.fetchData = fetchData;
     this.cache = new TTLCache<K, V>({
       defaultTTL: options.defaultTTL,
@@ -242,13 +242,13 @@ interface BatchFetchResult<K, V> {
   entries: [K, V][];
 }
 
-interface TTLCacheWithBatchFetchOptions<K> extends TTLCacheOptions {
+interface AutoRefreshBatchItemCacheOptions<K> extends TTLCacheOptions {
   refreshInterval?: number; // 自动刷新间隔，单位毫秒
   onFetchError?: (error: Error) => void;
   fetchOnStart?: boolean; // 新增：是否在创建时立即获取数据
 }
 
-export class TTLCacheWithBatchFetch<K, V> {
+export class AutoRefreshBatchItemCache<K, V> {
   private cache: TTLCache<K, V>;
   private fetchAllData: () => Promise<BatchFetchResult<K, V>>;
   private refreshInterval: number;
@@ -258,7 +258,7 @@ export class TTLCacheWithBatchFetch<K, V> {
 
   constructor(
     fetchAllData: () => Promise<BatchFetchResult<K, V>>, 
-    options: TTLCacheWithBatchFetchOptions<K>
+    options: AutoRefreshBatchItemCacheOptions<K>
   ) {
     this.fetchAllData = fetchAllData;
     this.cache = new TTLCache<K, V>({
@@ -379,23 +379,23 @@ export class TTLCacheWithBatchFetch<K, V> {
   }
 }
 
-interface TTLCacheWithSingleFetchOptions extends TTLCacheOptions {
+interface AutoRefreshSingleItemCacheOptions extends TTLCacheOptions {
   refreshInterval?: number;
   onFetchError?: (error: Error) => void;
   fetchOnStart?: boolean;
 }
 
-export class TTLCacheWithSingleFetch<V> {
+export class AutoRefreshSingleItemCache<V> {
   private static readonly SINGLE_KEY = Symbol('SINGLE_CACHE_KEY');
-  private cache: TTLCacheWithBatchFetch<symbol, V>;
+  private cache: AutoRefreshBatchItemCache<symbol, V>;
 
   constructor(
     fetchData: () => Promise<V>,
-    options: TTLCacheWithSingleFetchOptions
+    options: AutoRefreshSingleItemCacheOptions
   ) {
-    this.cache = new TTLCacheWithBatchFetch<symbol, V>(
+    this.cache = new AutoRefreshBatchItemCache<symbol, V>(
       async () => ({
-        entries: [[TTLCacheWithSingleFetch.SINGLE_KEY, await fetchData()]]
+        entries: [[AutoRefreshSingleItemCache.SINGLE_KEY, await fetchData()]]
       }),
       options
     );
@@ -405,20 +405,20 @@ export class TTLCacheWithSingleFetch<V> {
    * 同步获取数据，如果正在刷新则返回未找到
    */
   getSync(): CacheResult<V> {
-    return this.cache.getSync(TTLCacheWithSingleFetch.SINGLE_KEY);
+    return this.cache.getSync(AutoRefreshSingleItemCache.SINGLE_KEY);
   }
 
   /**
    * 异步获取数据，如果正在刷新则等待刷新完成
    */
   async get(): Promise<CacheResult<V>> {
-    return this.cache.get(TTLCacheWithSingleFetch.SINGLE_KEY);
+    return this.cache.get(AutoRefreshSingleItemCache.SINGLE_KEY);
   }
   /**
    * 手动设置缓存值
    */
   setUntilNextRefresh(value: V, options?: SetOptions): void {
-    this.cache.setUntilNextRefresh(TTLCacheWithSingleFetch.SINGLE_KEY, value, options);
+    this.cache.setUntilNextRefresh(AutoRefreshSingleItemCache.SINGLE_KEY, value, options);
   }
 
   /**

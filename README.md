@@ -31,7 +31,7 @@ if (result.found) {
 }
 
 // 带异步数据获取的用法
-import { TTLCacheBackedWithFetch } from './ttl-cache.ts';
+import { LazyLoadingCache } from './ttl-cache.ts';
 
 const fetchData = async (key: string) => {
   const response = await fetch(`https://api.example.com/data/${key}`);
@@ -42,12 +42,12 @@ const fetchData = async (key: string) => {
   return { got: false };
 };
 
-const cache = new TTLCacheBackedWithFetch(fetchData, {
+const cache = new LazyLoadingCache(fetchData, {
   defaultTTL: 60000,  // 1分钟过期
   maxSize: 1000
 });
 
-// 异��获取数据
+// 异步获取数据
 const data = await cache.get('key1');
 if (data.found) {
   console.log(data.value);
@@ -75,12 +75,12 @@ interface TTLCacheOptions {
 - `clear()`: 清空所有缓存
 - `cleanup()`: 清理过期项目
 
-### TTLCacheBackedWithFetch
+### LazyLoadingCache
 
 #### 构造函数选项
 
 ```typescript
-interface TTLCacheBackedWithFetchOptions {
+interface LazyLoadingCacheOptions {
   defaultTTL?: number;    // 默认过期时间（毫秒）
   maxSize?: number;       // 最大缓存项数量
   onFetchError?: (error: Error) => void;  // 获取数据失败时的错误处理回调
@@ -95,14 +95,14 @@ interface TTLCacheBackedWithFetchOptions {
 - `clear()`: 清空所有缓存
 - `cleanup()`: 清理过期项目
 
-### TTLCacheWithBatchFetch
+### AutoRefreshBatchItemCache
 
 用于批量获取和缓存数据的实现。适用于需要定期刷新全量数据的场景。
 
 #### 构造函数选项
 
 ```typescript
-interface TTLCacheWithBatchFetchOptions<K> {
+interface AutoRefreshBatchItemCacheOptions<K> {
   defaultTTL?: number;         // 默认过期时间（毫秒）
   maxSize?: number;            // 最大缓存项数量
   refreshInterval?: number;    // 自动刷新间隔（毫秒）
@@ -122,14 +122,14 @@ interface TTLCacheWithBatchFetchOptions<K> {
 - `cleanup()`: 清理过期项目
 - `shutdown()`: 停止自动刷新并清理资源
 
-### TTLCacheWithSingleFetch
+### AutoRefreshSingleItemCache
 
 用于缓存单个值的实现。适用于需要定期刷新单个数据源的场景。
 
 #### 构造函数选项
 
 ```typescript
-interface TTLCacheWithSingleFetchOptions {
+interface AutoRefreshSingleItemCache {
   defaultTTL?: number;         // 默认过期时间（毫秒）
   maxSize?: number;            // 最大缓存项数量
   refreshInterval?: number;    // 自动刷新间隔（毫秒）
@@ -156,7 +156,7 @@ const cache = new TTLCache<string, number>();
 cache.set('key1', 100, { ttl: 1000 });  // 1秒后过期
 
 // 异步数据获取和缓存
-const cache = new TTLCacheBackedWithFetch(async (key) => {
+const cache = new LazyLoadingCache(async (key) => {
   try {
     const response = await fetch(`https://api.example.com/data/${key}`);
     const data = await response.json();
@@ -180,7 +180,7 @@ const [result1, result2] = await Promise.all([
 ]);
 
 // 批量获取数据的缓存示例
-const batchCache = new TTLCacheWithBatchFetch(
+const batchCache = new AutoRefreshBatchItemCache(
   async () => ({
     entries: [
       ['key1', 'value1'],
@@ -196,7 +196,7 @@ const batchCache = new TTLCacheWithBatchFetch(
 );
 
 // 单值缓存示例
-const singleCache = new TTLCacheWithSingleFetch(
+const singleCache = new AutoRefreshSingleItemCache(
   async () => {
     const response = await fetch('https://api.example.com/data');
     return response.json();
@@ -220,7 +220,7 @@ if (result2.found) {
   console.log(result2.value);  // API返回的数据
 }
 
-// 记得在不需要时关闭��动刷新
+// 记得在不需要时关闭自动刷新
 batchCache.shutdown();
 singleCache.shutdown();
 ```
@@ -231,7 +231,7 @@ singleCache.shutdown();
 - 缓存大小超出 maxSize 时，会删除最早添加的项目
 - 异步获取数据时会自动合并并发请求
 - 数据获取失败时返回 `{ found: false }`
-- `TTLCacheWithBatchFetch` 和 `TTLCacheWithSingleFetch` 支持自动定时刷新数据
+- `AutoRefreshBatchItemCache` 和 `AutoRefreshSingleItemCache` 支持自动定时刷新数据
 - 使用这两个类时，记得在不需要时调用 `shutdown()` 方法停止自动刷新
 - `fetchOnStart` 选项可以控制是否在创建缓存实例时立即获取数据
 - 可以通过 `onFetchError` 回调处理数据获取失败的情况
