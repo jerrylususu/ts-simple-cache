@@ -46,7 +46,7 @@ export class TTLCache<K, V> {
    * 设置缓存项
    * @param key 键
    * @param value 值
-   * @param options 设置选项，包含 ttl 和 maxSize 等配置
+   * @param options 设置选��，包含 ttl 和 maxSize 等配置
    */
   set(key: K, value: V, options?: SetOptions): void {
     const ttl = options?.ttl ?? this.defaultTTL;
@@ -82,16 +82,6 @@ export class TTLCache<K, V> {
     }
 
     return { found: true, value: item.value };
-  }
-
-  /**
-   * 获取缓存项，如果不存在或已过期则返回 undefined
-   * @param key 键
-   * @returns 如果存在且未过期则返回值，否则返回 undefined
-   */
-  getOrUndefined(key: K): V | undefined {
-    const result = this.get(key);
-    return result.found ? result.value : undefined;
   }
 
   /**
@@ -207,14 +197,6 @@ export class TTLCacheBackedWithFetch<K, V> {
     });
 
     return fetchPromise;
-  }
-
-  /**
-   * 异步获取数据，如果数据不存在则返回 undefined
-   */
-  async getOrUndefined(key: K): Promise<V | undefined> {
-    const result = await this.get(key);
-    return result.found ? result.value : undefined;
   }
 
   /**
@@ -354,17 +336,9 @@ export class TTLCacheWithBatchFetch<K, V> {
   }
 
   /**
-   * 获取数据，如果不存在则返回 undefined
-   */
-  async getOrUndefined(key: K): Promise<V | undefined> {
-    const result = await this.get(key);
-    return result.found ? result.value : undefined;
-  }
-
-  /**
    * 手动设置缓存项
    */
-  set(key: K, value: V, options?: SetOptions): void {
+  setUntilNextRefresh(key: K, value: V, options?: SetOptions): void {
     this.cache.set(key, value, options);
   }
 
@@ -398,5 +372,76 @@ export class TTLCacheWithBatchFetch<K, V> {
       this.timer = null;
     }
     this.cache.clear();
+  }
+}
+
+interface TTLCacheWithSingleFetchOptions extends TTLCacheOptions {
+  refreshInterval?: number;
+  onFetchError?: (error: Error) => void;
+  fetchOnStart?: boolean;
+}
+
+export class TTLCacheWithSingleFetch<V> {
+  private static readonly SINGLE_KEY = Symbol('SINGLE_CACHE_KEY');
+  private cache: TTLCacheWithBatchFetch<symbol, V>;
+
+  constructor(
+    fetchData: () => Promise<V>,
+    options: TTLCacheWithSingleFetchOptions
+  ) {
+    this.cache = new TTLCacheWithBatchFetch<symbol, V>(
+      async () => ({
+        entries: [[TTLCacheWithSingleFetch.SINGLE_KEY, await fetchData()]]
+      }),
+      options
+    );
+  }
+
+  /**
+   * 同步获取数据，如果正在刷新则返回未找到
+   */
+  getSync(): CacheResult<V> {
+    return this.cache.getSync(TTLCacheWithSingleFetch.SINGLE_KEY);
+  }
+
+  /**
+   * 异步获取数据，如果正在刷新则等待刷新完成
+   */
+  async get(): Promise<CacheResult<V>> {
+    return this.cache.get(TTLCacheWithSingleFetch.SINGLE_KEY);
+  }
+  /**
+   * 手动设置缓存值
+   */
+  setUntilNextRefresh(value: V, options?: SetOptions): void {
+    this.cache.setUntilNextRefresh(TTLCacheWithSingleFetch.SINGLE_KEY, value, options);
+  }
+
+  /**
+   * 手动触发数据获取
+   */
+  async fetchAll(): Promise<void> {
+    return this.cache.fetchAll();
+  }
+
+  /**
+   * 清空缓存
+   */
+  clear(): void {
+    this.cache.clear();
+  }
+
+  /**
+   * 清理过期数据
+   */
+  cleanup(): void {
+    this.cache.cleanup();
+  }
+
+  /**
+   * 停止自动刷新并清理资源
+   */
+  shutdown(): void {
+    this.cache.shutdown();
   }
 } 

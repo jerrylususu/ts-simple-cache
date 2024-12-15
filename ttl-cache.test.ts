@@ -1,6 +1,6 @@
 import { assertEquals, assertFalse } from "jsr:@std/assert";
 import { delay } from "jsr:@std/async";
-import { TTLCache, TTLCacheBackedWithFetch, TTLCacheWithBatchFetch } from "./ttl-cache.ts";
+import { TTLCache, TTLCacheBackedWithFetch, TTLCacheWithBatchFetch, TTLCacheWithSingleFetch } from "./ttl-cache.ts";
 
 // TTLCache 的测试用例
 Deno.test("TTLCache - 基本的设置和获取操作", () => {
@@ -371,7 +371,7 @@ Deno.test("TTLCacheWithBatchFetch - 手动设置和清理操作", async () => {
   await cache.fetchAll();
 
   // 手动设置新值
-  cache.set("key2", 200);
+  cache.setUntilNextRefresh("key2", 200);
 
   // 验证两个值都存在
   let result1 = await cache.get("key1");
@@ -453,6 +453,160 @@ Deno.test("TTLCacheWithBatchFetch - fetchOnStart 选项测试", async () => {
 
   // 验证数据已加载
   result = await cache.get("key1");
+  assertEquals(result.found, true);
+  if (result.found) {
+    assertEquals(result.value, 100);
+  }
+
+  cache.shutdown();
+});
+
+// TTLCacheWithSingleFetch 的测试用例
+Deno.test("TTLCacheWithSingleFetch - 基本的获取操作", async () => {
+  const fetchData = async () => {
+    return 100;
+  };
+
+  const cache = new TTLCacheWithSingleFetch<number>(fetchData, {});
+  const result = await cache.get();
+  
+  assertEquals(result.found, true);
+  if (result.found) {
+    assertEquals(result.value, 100);
+  }
+  
+  cache.shutdown();
+});
+
+Deno.test("TTLCacheWithSingleFetch - 处理fetch失败的情况", async () => {
+  let errorCaught = false;
+  const fetchData = async () => {
+    throw new Error("网络错误");
+  };
+
+  const cache = new TTLCacheWithSingleFetch(fetchData, {
+    onFetchError: (error: Error) => {
+      errorCaught = true;
+    }
+  });
+
+  const result = await cache.get();
+  assertFalse(result.found);
+  assertEquals(errorCaught, true);
+
+  cache.shutdown();
+});
+
+Deno.test("TTLCacheWithSingleFetch - TTL过期测试", async () => {
+  const fetchData = async () => {
+    return 100;
+  };
+
+  const cache = new TTLCacheWithSingleFetch(fetchData, { defaultTTL: 100 });
+  
+  // 验证刚设置的值可以被获取
+  let result = await cache.get();
+  assertEquals(result.found, true);
+  
+  // 等待过期
+  await delay(150);
+  
+  // 验证值已过期
+  result = await cache.get();
+  assertEquals(result.found, false);
+
+  cache.shutdown();
+});
+
+Deno.test("TTLCacheWithSingleFetch - 自动刷新测试", async () => {
+  let fetchCount = 0;
+  const fetchData = async () => {
+    fetchCount++;
+    return fetchCount;
+  };
+
+  const cache = new TTLCacheWithSingleFetch(fetchData, {
+    refreshInterval: 100,
+  });
+
+  // 验证第一次获取的值
+  let result = await cache.get();
+  assertEquals(result.found, true);
+  if (result.found) assertEquals(result.value, 1);
+
+  // 等待自动刷新
+  await delay(150);
+
+  // 验证值已更新
+  result = await cache.get();
+  assertEquals(result.found, true);
+  if (result.found) assertEquals(result.value, 2);
+
+  cache.shutdown();
+});
+
+Deno.test("TTLCacheWithSingleFetch - 手动设置和清理操作", async () => {
+  const fetchData = async () => {
+    return 100;
+  };
+
+  const cache = new TTLCacheWithSingleFetch(fetchData, { refreshInterval: 100 });
+
+  // 验证自动获取的值
+  let result = await cache.get();
+  assertEquals(result.found, true);
+  if (result.found) assertEquals(result.value, 100);
+
+  // 手动设置值
+  cache.setUntilNextRefresh(200);
+
+  // 验证手动设置的值
+  result = await cache.get();
+  assertEquals(result.found, true);
+  if (result.found) assertEquals(result.value, 200);
+
+  // 到下一次自动刷新
+  await delay(150);
+
+  // 验证自动获取的值
+  result = await cache.get();
+  assertEquals(result.found, true);
+  if (result.found) assertEquals(result.value, 100);
+
+  cache.shutdown();
+});
+
+Deno.test("TTLCacheWithSingleFetch - fetchOnStart 选项测试", async () => {
+  let fetchCount = 0;
+  const fetchData = async () => {
+    fetchCount++;
+    return 100;
+  };
+
+  // 测试默认行为（fetchOnStart = true）
+  const defaultCache = new TTLCacheWithSingleFetch(fetchData, {});
+  assertEquals(fetchCount, 1); // 应该立即调用 fetchData
+  defaultCache.shutdown();
+
+  // 重置计数器
+  fetchCount = 0;
+
+  // 测试 fetchOnStart = false
+  const cache = new TTLCacheWithSingleFetch(fetchData, {
+    fetchOnStart: false
+  });
+  assertEquals(fetchCount, 0); // 不应该调用 fetchData
+
+  // 验证数据尚未加载
+  let result = await cache.getSync();
+  assertFalse(result.found);
+
+  // 手动调用 fetchAll
+  await cache.fetchAll();
+  assertEquals(fetchCount, 1);
+
+  // 验证数据已加载
+  result = await cache.get();
   assertEquals(result.found, true);
   if (result.found) {
     assertEquals(result.value, 100);
