@@ -24,12 +24,7 @@ interface TTLCacheOptions {
   // cleanupInterval?: number;
 }
 
-interface TTLCacheBackedWithFetchOptions extends TTLCacheOptions {
-//   fetchData: (key: any) => Promise<FetchResult<any>>;
-  // 未来可以添加更多选项
-  // retryAttempts?: number;
-  // retryDelay?: number;
-}
+
 
 export class TTLCache<K, V> {
   private cache: Map<K, { value: V; expireAt: number }>;
@@ -46,7 +41,7 @@ export class TTLCache<K, V> {
    * 设置缓存项
    * @param key 键
    * @param value 值
-   * @param options 设置选��，包含 ttl 和 maxSize 等配置
+   * @param options 设置选项，包含 ttl 和 maxSize 等配置
    */
   set(key: K, value: V, options?: SetOptions): void {
     const ttl = options?.ttl ?? this.defaultTTL;
@@ -134,10 +129,15 @@ interface FetchNotFound {
 
 type FetchResult<V> = FetchSuccess<V> | FetchNotFound;
 
+interface TTLCacheBackedWithFetchOptions extends TTLCacheOptions {
+  onFetchError?: (error: Error) => void;
+}
+
 export class TTLCacheBackedWithFetch<K, V> {
   private cache: TTLCache<K, V>;
   private pendingFetches: Map<K, PendingFetch<V>>;
   private fetchData: (key: K) => Promise<FetchResult<V>>;
+  private readonly onFetchError: (error: Error) => void;
 
   constructor(fetchData: (key: K) => Promise<FetchResult<V>>, options: TTLCacheBackedWithFetchOptions) {
     this.fetchData = fetchData;
@@ -146,6 +146,9 @@ export class TTLCacheBackedWithFetch<K, V> {
       maxSize: options.maxSize
     });
     this.pendingFetches = new Map();
+    this.onFetchError = options.onFetchError ?? ((error: Error) => {
+      console.error('Failed to fetch data:', error);
+    });
   }
 
   /**
@@ -184,7 +187,8 @@ export class TTLCacheBackedWithFetch<K, V> {
       }
       this.cache.set(key, result.data);
       return { found: true, value: result.data } as CacheHit<V>;
-    }).catch(_error => {
+    }).catch(error => {
+      this.onFetchError(error);
       this.pendingFetches.delete(key);
       return { found: false } as CacheMiss;
     }).finally(() => {

@@ -134,7 +134,7 @@ Deno.test("TTLCacheBackedWithFetch - TTL过期后重新获取", async () => {
   assertEquals(fetchCount, 2);
 });
 
-Deno.test("TTLCacheBackedWithFetch - 处理fetch抛出异常的情况", async () => {
+Deno.test("TTLCacheBackedWithFetch - 处理fetch抛出异常的情��", async () => {
   const fetchData = async (key: string) => {
     throw new Error("网络错误");
   };
@@ -235,7 +235,7 @@ Deno.test("TTLCacheWithBatchFetch - 处理fetch失败的情况", async () => {
   // 验证 fetchAll 不会抛出异常
   await cache.fetchAll();
   
-  // 验证获取数据返回未找到
+  // 验证获取数据返回���找到
   const result = await cache.get("key1");
   assertFalse(result.found);
 
@@ -460,6 +460,63 @@ Deno.test("TTLCacheWithBatchFetch - fetchOnStart 选项测试", async () => {
 
   cache.shutdown();
 });
+
+Deno.test("TTLCacheBackedWithFetch - onFetchError 回调测试", async () => {
+    let errorMessage = "";
+    const expectedError = new Error("自定义错误");
+    
+    const fetchData = async (key: string) => {
+      throw expectedError;
+    };
+    
+    const cache = new TTLCacheBackedWithFetch(fetchData, {
+      onFetchError: (error: Error) => {
+        errorMessage = error.message;
+      }
+    });
+    
+    // 触发错误
+    const result = await cache.get("key1");
+    
+    // 验证错误回调被调用
+    assertEquals(errorMessage, "自定义错误");
+    
+    // 验证返回未找到
+    assertFalse(result.found);
+  });
+  
+  Deno.test("TTLCacheBackedWithFetch - 默认错误处理测试", async () => {
+    // 保存原始的 console.error
+    const originalConsoleError = console.error;
+    let errorLogged = false;
+    
+    // 替换 console.error
+    console.error = (...args: any[]) => {
+      errorLogged = true;
+    };
+    
+    try {
+      const fetchData = async (key: string) => {
+        throw new Error("测试错误");
+      };
+      
+      const cache = new TTLCacheBackedWithFetch(fetchData, {});
+      
+      // 触发错误
+      const result = await cache.get("key1");
+      
+      // 验证错误被记录
+      assertEquals(errorLogged, true);
+      
+      // 验证返回未找到
+      assertFalse(result.found);
+    } finally {
+      // 恢复原始的 console.error
+      console.error = originalConsoleError;
+    }
+  });
+  
+  
 
 // TTLCacheWithSingleFetch 的测试用例
 Deno.test("TTLCacheWithSingleFetch - 基本的获取操作", async () => {
