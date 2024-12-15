@@ -46,7 +46,7 @@ export class TTLCache<K, V> {
    * 设置缓存项
    * @param key 键
    * @param value 值
-   * @param options 设置选��，包含 ttl 和 maxSize 等配置
+   * @param options 设置选项，包含 ttl 和 maxSize 等配置
    */
   set(key: K, value: V, options?: SetOptions): void {
     const ttl = options?.ttl ?? this.defaultTTL;
@@ -159,7 +159,7 @@ export class TTLCacheBackedWithFetch<K, V> {
   }
 
   /**
-   * ��步获取缓存数据，如果数据不存在或已过期则返回未找到
+   * 步获取缓存数据，如果数据不存在或已过期则返回未找到
    */
   getSync(key: K): CacheResult<V> {
     return this.cache.get(key);
@@ -236,5 +236,167 @@ export class TTLCacheBackedWithFetch<K, V> {
    */
   cleanup(): void {
     this.cache.cleanup();
+  }
+
+  /**
+   * 手动设置缓存项
+   * @param key 键
+   * @param value 值
+   * @param options 设置选项，包含 ttl 等配置
+   */
+  set(key: K, value: V, options?: SetOptions): void {
+    this.cache.set(key, value, options);
+  }
+}
+
+/**
+ * 批量获取数据的结果类型
+ */
+interface BatchFetchResult<K, V> {
+  entries: [K, V][];
+}
+
+interface TTLCacheWithBatchFetchOptions<K> extends TTLCacheOptions {
+  refreshInterval?: number; // 自动刷新间隔，单位毫秒
+  onFetchError?: (error: Error) => void;
+  fetchOnStart?: boolean; // 新增：是否在创建时立即获取数据
+}
+
+export class TTLCacheWithBatchFetch<K, V> {
+  private cache: TTLCache<K, V>;
+  private fetchAllData: () => Promise<BatchFetchResult<K, V>>;
+  private refreshInterval: number;
+  private currentFetch: Promise<void> | null = null;
+  private timer: number | null = null;
+  private readonly onFetchError: (error: Error) => void;
+
+  constructor(
+    fetchAllData: () => Promise<BatchFetchResult<K, V>>, 
+    options: TTLCacheWithBatchFetchOptions<K>
+  ) {
+    this.fetchAllData = fetchAllData;
+    this.cache = new TTLCache<K, V>({
+      defaultTTL: options.defaultTTL,
+      maxSize: options.maxSize
+    });
+    this.refreshInterval = options.refreshInterval ?? 5 * 60 * 1000; // 默认5分钟
+    
+    // 根据 fetchOnStart 选项决定是否立即获取数据
+    if (options.fetchOnStart ?? true) {
+      this.fetchAll();
+    }
+    
+    // 设置定时刷新
+    if (this.refreshInterval > 0) {
+      this.timer = setInterval(() => {
+        this.fetchAll();
+      }, this.refreshInterval);
+    }
+
+    this.onFetchError = options.onFetchError ?? ((_error: Error) => {
+      console.error('Failed to fetch all data:', _error);
+    });
+  }
+
+  /**
+   * 同步获取数据，如果正在刷新则返回未找到
+   */
+  getSync(key: K): CacheResult<V> {
+    return this.cache.get(key);
+  }
+
+  /**
+   * 异步获取数据，如果正在刷新则等待刷新完成
+   */
+  async get(key: K): Promise<CacheResult<V>> {
+    // 如果有正在进行的获取，先等待其完成
+    if (this.currentFetch) {
+      await this.currentFetch;
+    }
+    return this.cache.get(key);
+  }
+
+  /**
+   * 手动触发全量数据获取
+   */
+  async fetchAll(): Promise<void> {
+    // 如果已经有正在进行的获取，直接返回该 Promise
+    if (this.currentFetch) {
+      return this.currentFetch;
+    }
+
+    // 创建新的获取请求
+    this.currentFetch = this.doFetchAll();
+    
+    try {
+      await this.currentFetch;
+    } finally {
+      this.currentFetch = null;
+    }
+  }
+
+  private async doFetchAll(): Promise<void> {
+    let result: BatchFetchResult<K, V>;
+    try {
+    result = await this.fetchAllData();
+    } catch (error) {
+      this.onFetchError(error as Error);
+      return;
+    }
+
+    // 清空当前缓存
+    this.cache.clear();
+    
+    // 将新数据写入缓存
+    for (const [key, value] of result.entries) {
+    this.cache.set(key, value);
+    }
+  }
+
+  /**
+   * 获取数据，如果不存在则返回 undefined
+   */
+  async getOrUndefined(key: K): Promise<V | undefined> {
+    const result = await this.get(key);
+    return result.found ? result.value : undefined;
+  }
+
+  /**
+   * 手动设置缓存项
+   */
+  set(key: K, value: V, options?: SetOptions): void {
+    this.cache.set(key, value, options);
+  }
+
+  /**
+   * 删除缓存项
+   */
+  delete(key: K): void {
+    this.cache.delete(key);
+  }
+
+  /**
+   * 清空所有缓存
+   */
+  clear(): void {
+    this.cache.clear();
+  }
+
+  /**
+   * 清理过期数据
+   */
+  cleanup(): void {
+    this.cache.cleanup();
+  }
+
+  /**
+   * 停止自动刷新并清理资源
+   */
+  shutdown(): void {
+    if (this.timer !== null) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+    this.cache.clear();
   }
 } 
