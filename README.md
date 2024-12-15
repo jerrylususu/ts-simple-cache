@@ -1,5 +1,8 @@
 # TTL Cache
 
+> [!CAUTION]
+> 本项目代码由 LLM 生成，未经完整测试和验证；切勿在生产环境使用！
+
 一个简单但功能强大的带有 TTL (Time-To-Live) 的缓存实现，支持基本缓存操作和异步数据获取。
 
 ## 特性
@@ -90,7 +93,7 @@ interface LazyLoadingCacheOptions {
 #### 方法
 
 - `getSync(key: K): CacheResult<V>`: 同步获取缓存数据
-- `get(key: K): Promise<CacheResult<V>>`: 异步获取数据
+- `get(key: K): Promise<CacheResult<V>>`: 异步获取数据（本地有时直接返回；如果本地没有，发起请求从远端获取并缓存；如果已有进行中的请求，等待其完成）
 - `delete(key: K)`: 删除缓存项
 - `clear()`: 清空所有缓存
 - `cleanup()`: 清理过期项目
@@ -114,7 +117,7 @@ interface AutoRefreshBatchItemCacheOptions<K> {
 #### 方法
 
 - `getSync(key: K): CacheResult<V>`: 同步获取缓存数据
-- `get(key: K): Promise<CacheResult<V>>`: 异步获取数据
+- `get(key: K): Promise<CacheResult<V>>`: 异步获取数据（如果刷新正在进行中，等待其完成）
 - `fetchAll(): Promise<void>`: 手动触发全量数据获取
 - `setUntilNextRefresh(key: K, value: V, options?: SetOptions)`: 手动设置缓存项（下次刷新前有效）
 - `delete(key: K)`: 删除缓存项
@@ -141,7 +144,7 @@ interface AutoRefreshSingleItemCache {
 #### 方法
 
 - `getSync(): CacheResult<V>`: 同步获取缓存数据
-- `get(): Promise<CacheResult<V>>`: 异步获取数据
+- `get(): Promise<CacheResult<V>>`: 异步获取数据（如果刷新正在进行中，等待其完成）
 - `fetchAll(): Promise<void>`: 手动触发数据获取
 - `setUntilNextRefresh(value: V, options?: SetOptions)`: 手动设置缓存值（下次刷新前有效）
 - `clear()`: 清空缓存
